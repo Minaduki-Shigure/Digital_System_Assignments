@@ -1,4 +1,4 @@
-#include "../inc/ls.h"
+#include "../inc/myls.h"
 
 int main(int argc, char** argv)
 {    

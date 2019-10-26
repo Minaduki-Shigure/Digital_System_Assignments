@@ -1,4 +1,4 @@
-#include "../inc/cp.h"
+#include "../inc/mycp.h"
 
 int main(int argc, char** argv)
 {
