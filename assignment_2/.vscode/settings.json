@@ -3,6 +3,7 @@
         "string.h": "c",
         "floatadd.h": "c",
         "fat12.h": "c",
-        "cp.h": "c"
+        "cp.h": "c",
+        "myls.h": "c"
     }
 }

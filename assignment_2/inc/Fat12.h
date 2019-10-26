@@ -16,6 +16,7 @@
 #include "../lib/direntry.h"
 #include "../lib/fat.h"
 
+/* 最大路径长度，如果因路径太长报错退出，可以在此修改或直接在编译时override */
 #define MAXPATHLEN 255
 
 #ifndef TRUE
@@ -25,11 +26,8 @@
 
 uint8_t *mmap_file(char *filename, int *fd);
 struct bpb33* check_bootsector(uint8_t *image_buf);
-uint16_t get_fat_entry(uint16_t clusternum, uint8_t *image_buf, 
-		       struct bpb33* bpb);
-void set_fat_entry(uint16_t clusternum, uint16_t value, 
-		   uint8_t *image_buf, struct bpb33* bpb);
+uint16_t get_fat_entry(uint16_t clusternum, uint8_t *image_buf, struct bpb33* bpb);
+void set_fat_entry(uint16_t clusternum, uint16_t value, uint8_t *image_buf, struct bpb33* bpb);
 int is_end_of_file(uint16_t cluster) ;
 uint8_t *root_dir_addr(uint8_t *image_buf, struct bpb33* bpb);
-uint8_t *cluster_to_addr(uint16_t cluster, uint8_t *image_buf, 
-			 struct bpb33* bpb);
+uint8_t *cluster_to_addr(uint16_t cluster, uint8_t *image_buf, struct bpb33* bpb);

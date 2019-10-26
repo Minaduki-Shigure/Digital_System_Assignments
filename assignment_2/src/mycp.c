@@ -5,28 +5,37 @@ int main(int argc, char** argv)
     int fd;
     uint8_t *image_buf;
     struct bpb33* bpb;
-    if (argc < 4 || argc > 4) {
-	usage();
+
+    if (argc < 4 || argc > 4)
+    {
+	    usage();
     }
 
     image_buf = mmap_file(argv[1], &fd);
     bpb = check_bootsector(image_buf);
 
-    /* use the "a:" bit to determine whether we're copying in or out */
-    if (strncmp("a:", argv[2], 2)==0) {
-	/* copy from FAT-12 disk image to external filesystem */
-	copyout(argv[2], argv[3], image_buf, bpb);
-    } else if (strncmp("a:", argv[3], 2)==0) {
-	/* copy from external filesystem to FAT-12 disk image */
-	copyin(argv[2], argv[3], image_buf, bpb);
-    } else {
-	usage();
+    /* 将a:当作虚拟的卷标 */
+    if (strncmp("a:", argv[2], 2)==0)
+    {
+        /* 读取镜像文件 */
+        copyout(argv[2], argv[3], image_buf, bpb);
     }
+    else if (strncmp("a:", argv[3], 2)==0)
+    {
+        /* 写入镜像文件 */
+        copyin(argv[2], argv[3], image_buf, bpb);
+    }
+    else
+    {
+	    usage();
+    }
+
     close(fd);
     exit(0);
 }
 
 
+/* 如果输入的argument格式不对，则提示使用方法 */
 void usage(void)
 {
     fprintf(stderr, "Usage:\n");
@@ -38,7 +47,7 @@ void usage(void)
     exit(1);
 }
 
-/* get_name retrieves the filename from a directory entry */
+/* 获取文件名 */
 void get_name(char *fullname, struct direntry *dirent) 
 {
     char name[9];
@@ -50,35 +59,44 @@ void get_name(char *fullname, struct direntry *dirent)
     memcpy(name, &(dirent->deName[0]), 8);
     memcpy(extension, dirent->deExtension, 3);
 
-    /* names are space padded - remove the padding */
-    for (i = 8; i > 0; i--) {
-	if (name[i] == ' ') 
-	    name[i] = '\0';
-	else 
-	    break;
+    /* 对于用空格补全的名字，把空格删了改成EOF*/
+    for (i = 8; i > 0; --i)
+    {
+        if (name[i] == ' ')
+        {
+            name[i] = '\0';
+        }
+        else
+        {
+            break;
+        }
     }
 
-    /* extensions aren't normally space padded - but remove the
-       padding anyway if it's there */
-    for (i = 3; i > 0; i--) {
-	if (extension[i] == ' ') 
-	    extension[i] = '\0';
-	else 
-	    break;
+    /* 拓展名也同样这样删掉补位空格 */
+    for (i = 3; i > 0; --i)
+    {
+        if (extension[i] == ' ')
+        {
+            extension[i] = '\0';
+        }
+        else
+        {
+            break;
+        }
     }
+
     fullname[0]='\0';
     strcat(fullname, name);
 
-    /* append the extension if it's not a directory */
-    if ((dirent->deAttributes & ATTR_DIRECTORY) == 0) {
-	strcat(fullname, ".");
-	strcat(fullname, extension);
+    /* 如果是目录就不管，否则加上拓展名 */
+    if ((dirent->deAttributes & ATTR_DIRECTORY) == 0)
+    {
+        strcat(fullname, ".");
+        strcat(fullname, extension);
     }
 }
 
-struct direntry* find_file(char *infilename, uint16_t cluster,
-			   int find_mode,
-			   uint8_t *image_buf, struct bpb33* bpb)
+struct direntry* find_file(char *infilename, uint16_t cluster, int find_mode, uint8_t *image_buf, struct bpb33* bpb)
 {
     char buf[MAXPATHLEN];
     char *seek_name, *next_name;
