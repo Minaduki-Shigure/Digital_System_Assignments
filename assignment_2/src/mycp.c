@@ -98,170 +98,188 @@ void get_name(char *fullname, struct direntry *dirent)
 
 struct direntry* find_file(char *infilename, uint16_t cluster, int find_mode, uint8_t *image_buf, struct bpb33* bpb)
 {
+    int d;
     char buf[MAXPATHLEN];
     char *seek_name, *next_name;
-    int d;
     struct direntry *dirent;
     uint16_t dir_cluster;
     char fullname[13];
 
-    /* find the first dirent in this directory */
+    /* 打开目录 */
     dirent = (struct direntry*)cluster_to_addr(cluster, image_buf, bpb);
 
-    /* first we need to split the file name we're looking for into the
-       first part of the path, and the remainder.  We hunt through the
-       current directory for the first part.  If there's a remainder,
-       and what we find is a directory, then we recurse, and search
-       that directory for the remainder */
-
+    /* 接下来，将文件的路径拆成目录+文件名的格式 */
     strncpy(buf, infilename, MAXPATHLEN);
     seek_name = buf;
 
-    /* trim leading slashes */
-    while (*seek_name == '/' || *seek_name == '\\') {
-	seek_name++;
+    /* 舍去第一个斜杠 */
+    while (*seek_name == '/' || *seek_name == '\\')
+    {
+	    seek_name++;
     }
 
-    /* search for any more slashes - if so, it's a dirname */
+    /* 继续搜索，如果又找到了斜杠，证明这是一个目录 */
     next_name = seek_name;
-    while (1) {
-	if (*next_name == '/' || *next_name == '\\') {
-	    *next_name = '\0';
-	    next_name ++;
-	    break;
-	}
-	if (*next_name == '\0') {
-	    /* end of name - no slashes found */
-	    next_name = NULL;
-	    if (find_mode == FIND_DIR) {
-		return dirent;
-	    }
-	    break;
-	}
-	next_name++;
+    while (1)
+    {
+        if (*next_name == '/' || *next_name == '\\')
+        {
+            *next_name = '\0';
+            next_name ++;
+            break;
+        }
+        if (*next_name == '\0')
+        {
+            /* 没有斜杠了，这是一个文件 */
+            next_name = NULL;
+            if (find_mode == FIND_DIR)
+            {
+                return dirent;
+            }
+            break;
+        }
+        next_name++;
     }
 
-    while (1) {
-	/* hunt a cluster for the relevant dirent.  If we reach the
-	   end of the cluster, we'll need to go to the next cluster
-	   for this directory */
-	for (d = 0; d < bpb->bpbBytesPerSec * bpb->bpbSecPerClust; 
-	     d += sizeof(struct direntry)) {
-	    if (dirent->deName[0] == SLOT_EMPTY) {
-		/* we failed to find the file */
-		return NULL;
-	    }
-	    if (dirent->deName[0] == SLOT_DELETED) {
-		/* skip over a deleted file */
-		dirent++;
-		continue;
-	    }
-	    get_name(fullname, dirent);
-	    if (strcmp(fullname, seek_name)==0) {
-		/* found it! */
-		if ((dirent->deAttributes & ATTR_DIRECTORY) != 0) {
-		    /* it's a directory */
-		    if (next_name == NULL) {
-			fprintf(stderr, "Cannot copy out a directory\n");
-			exit(1);
-		    }
-		    dir_cluster = getushort(dirent->deStartCluster);
-		    return find_file(next_name, dir_cluster, 
-				     find_mode, image_buf, bpb);
-		} else if ((dirent->deAttributes & ATTR_VOLUME) != 0) {
-		    /* it's a volume */
-		    fprintf(stderr, "Cannot copy out a volume\n");
-		    exit(1);
-		} else {
-		    /* assume it's a file */
-		    return dirent;
-		}
-	    }
-	    dirent++;
-	}
-	/* we've reached the end of the cluster for this directory.
-	   Where's the next cluster? */
-	if (cluster == 0) {
-	    // root dir is special
-	    dirent++;
-	} else {
-	    cluster = get_fat_entry(cluster, image_buf, bpb);
-	    dirent = (struct direntry*)cluster_to_addr(cluster, 
-						       image_buf, bpb);
-	}
+    while (1)
+    {
+        /* 寻找对应的簇，直到最后一个簇被找到 */
+        for (d = 0; d < bpb->bpbBytesPerSec * bpb->bpbSecPerClust; d += sizeof(struct direntry))
+        {
+            if (dirent->deName[0] == SLOT_EMPTY)
+            {
+                /* slot是空的 */
+                return NULL;
+            }
+            if (dirent->deName[0] == SLOT_DELETED)
+            {
+                /* slot处文件已被删除 */
+                dirent++;
+                continue;
+            }
+
+            get_name(fullname, dirent);
+            if (strcmp(fullname, seek_name)==0)
+            {
+                /* 找到了目标 */
+                if ((dirent->deAttributes & ATTR_DIRECTORY) != 0)
+                {
+                    /* 如果是一个目录 */
+                    if (next_name == NULL)
+                    {
+                        fprintf(stderr, "Error: Cannot copy out a directory\n");
+                        exit(1);
+                    }
+                    dir_cluster = getushort(dirent->deStartCluster);
+                    /* 递归寻找 */
+                    return find_file(next_name, dir_cluster, find_mode, image_buf, bpb);
+                }
+                else if ((dirent->deAttributes & ATTR_VOLUME) != 0)
+                {
+                    /* 如果是一个卷 */
+                    fprintf(stderr, "Error: Cannot copy out a volume\n");
+                    exit(1);
+                }
+                else
+                {
+                    /* 返回文件的dirent */
+                    return dirent;
+                }
+            }
+            dirent++;
+        }
+        /* 当前簇读完，寻找下一个 */
+        if (cluster == 0)
+        {
+            /* 根目录直接往下走 */
+            dirent++;
+        }
+        else
+        {
+            cluster = get_fat_entry(cluster, image_buf, bpb);
+            dirent = (struct direntry*)cluster_to_addr(cluster, image_buf, bpb);
+        }
     }
 }
 
-/* copy_out_file actually does the work of copying, recursing through
-   the clusters of the memory disk image, and copying out a cluster at
-   a time */
-
-void copy_out_file(FILE *fd, uint16_t cluster, uint32_t bytes_remaining,
-		   uint8_t *image_buf, struct bpb33* bpb)
+/* 这个是实际干活的函数 */
+/* 寻找文件对应的簇，挨个copy */
+void copy_out_file(FILE *fd, uint16_t cluster, uint32_t bytes_remaining, uint8_t *image_buf, struct bpb33* bpb)
 {
     int total_clusters, clust_size;
     uint8_t *p;
 
     clust_size = bpb->bpbSecPerClust * bpb->bpbBytesPerSec;
     total_clusters = bpb->bpbSectors / bpb->bpbSecPerClust;
-    if (cluster == 0) {
-	fprintf(stderr, "Bad file termination\n");
-	return;
-    } else if (is_end_of_file(cluster)) {
-	return;	
-    } else if (cluster > total_clusters) {
-	abort(); /* this shouldn't be able to happen */
+
+    if (cluster == 0)
+    {
+        fprintf(stderr, "Bad file termination\n");
+        return;
+    }
+    /* 已到达最后一个簇 */
+    else if (is_end_of_file(cluster))
+    {
+	    return;	
+    }
+    /* 传入的簇号越界 */
+    else if (cluster > total_clusters)
+    {
+	    abort();
     }
 
-    /* map the cluster number to the data location */
+    /* 找到memory map中该簇对应的地址 */
     p = cluster_to_addr(cluster, image_buf, bpb);
 
-    if (bytes_remaining <= clust_size) {
-	/* this is the last cluster */
-	fwrite(p, bytes_remaining, 1, fd);
-    } else {
-	/* more clusters after this one */
-	fwrite(p, clust_size, 1, fd);
+    if (bytes_remaining <= clust_size)
+    {
+        /* 剩余待处理的数据大小不足一个簇大小，这是最后一个簇了，只写入剩余大小 */
+        fwrite(p, bytes_remaining, 1, fd);
+    }
+    else
+    {
+        /* 后面还有，把整个簇写入文件 */
+        fwrite(p, clust_size, 1, fd);
 
-	/* recurse, continuing to copy */
-	copy_out_file(fd, get_fat_entry(cluster, image_buf, bpb), 
-		      bytes_remaining - clust_size, image_buf, bpb);
+        /* 递归，copy下一个簇 */
+        copy_out_file(fd, get_fat_entry(cluster, image_buf, bpb), bytes_remaining - clust_size, image_buf, bpb);
     }
     return;
 }
 
-/* copyout copies a file from the FAT-12 memory disk image to a
-   regular file in the file system */
 
-void copyout(char *infilename, char* outfilename,
-	     uint8_t *image_buf, struct bpb33* bpb)
+/* 这个是寻找目标的函数 */
+/* 找到src的dirent并且打开dst的socket */
+void copyout(char *infilename, char* outfilename, uint8_t *image_buf, struct bpb33* bpb)
 {
-    struct direntry *dirent = (void*)1;
     FILE *fd;
+    struct direntry *dirent = (void*)1;
+    
     uint16_t start_cluster;
     uint32_t size;
 
-    /* skip the volume name */
+    /* 舍去虚拟的卷标 */
     assert(strncmp("a:", infilename, 2)==0);
     infilename+=2;
 
-    /* find the dirent of the file in the memory disk image */
+    /* 找到文件对应的dirent */
     dirent = find_file(infilename, 0, FIND_FILE, image_buf, bpb);
-    if (dirent == NULL) {
-	fprintf(stderr, "No file called %s exists in the disk image\n",
-		infilename);
-	exit(1);
+    /* 文件不存在 */
+    if (dirent == NULL)
+    {
+	    fprintf(stderr, "No file called %s exists in the disk image\n", infilename);
+	    exit(1);
     }
 
-    /* open the real file for writing */
+    /* 打开写入目标文件 */
     fd = fopen(outfilename, "w");
-    if (fd == NULL) {
-	fprintf(stderr, "Can't open file %s to copy data out\n",
-		outfilename);
-	exit(1);
+    if (fd == NULL)
+    {
+	    fprintf(stderr, "Cannot open file %s to copy data out\nCheck if you have the permission to do so.\n", outfilename);
+	    exit(1);
     }
 
-    /* do the actual copy out*/
+    /* 调用逐簇递归copy */
     start_cluster = getushort(dirent->deStartCluster);
     size = getulong(dirent->deFileSize);
     copy_out_file(fd, start_cluster, size, image_buf, bpb);
@@ -269,12 +287,10 @@ void copyout(char *infilename, char* outfilename,
     fclose(fd);
 }
 
-/* copy_in_file actually does the copying of the file into the memory
-   image, updates the FAT, and returns the starting cluster of the
-   file */
-
-uint16_t copy_in_file(FILE* fd, uint8_t *image_buf, struct bpb33* bpb, 
-		      uint32_t *size)
+/* 写入部分的代码似乎不是总能成功 */
+/* 这个是实际干活的函数 */
+/* copy文件内容至镜像中，更新FAT表，返回值为起始簇的位置 */
+uint16_t copy_in_file(FILE* fd, uint8_t *image_buf, struct bpb33* bpb, uint32_t *size)
 {
     uint32_t clust_size, total_clusters, i;
     uint8_t *buf;
@@ -285,175 +301,196 @@ uint16_t copy_in_file(FILE* fd, uint8_t *image_buf, struct bpb33* bpb,
     clust_size = bpb->bpbSecPerClust * bpb->bpbBytesPerSec;
     total_clusters = bpb->bpbSectors / bpb->bpbSecPerClust;
     buf = malloc(clust_size);
-    while(1) {
-	/* read a block of data, and store it */
-	bytes = fread(buf, 1, clust_size, fd);
-	if (bytes > 0) {
-	    *size += bytes;
 
-	    /* find a free cluster */
-	    for (i = 2; i < total_clusters; i++) {
-		if (get_fat_entry(i, image_buf, bpb) == CLUST_FREE) {
-		    break;
-		}
-	    }
+    while(1)
+    {
+        /* 将一个簇大小的数据读入内存中 */
+        bytes = fread(buf, 1, clust_size, fd);
+        /* bytes==0就证明读完了 */
+        if (bytes > 0)
+        {
+            /* 更新文件大小 */
+            *size += bytes;
 
-	    if (i == total_clusters) {
-		/* oops - we ran out of disk space */
-		fprintf(stderr, "No more space in filesystem\n");
-		/* we should clean up here, rather than just exit */ 
-		exit(1);
-	    }
+            /* 找一个没有被占用的簇 */
+            for (i = 2; i < total_clusters; ++i)
+            {
+                if (get_fat_entry(i, image_buf, bpb) == CLUST_FREE)
+                {
+                    break;
+                }
+            }
 
-	    /* remember the first cluster, as we need to store this in
-	       the dirent */
-	    if (start_cluster == 0) {
-		start_cluster = i;
-	    } else {
-		/* link the previous cluster to this one in the FAT */
-		assert(prev_cluster != 0);
-		set_fat_entry(prev_cluster, i, image_buf, bpb);
-	    }
-	    /* make sure we've recorded this cluster as used */
-	    set_fat_entry(i, FAT12_MASK&CLUST_EOFS, image_buf, bpb);
+            if (i == total_clusters)
+            {
+                /* 找到了最后一个簇都不是free的，证明磁盘空间用完了 */
+                fprintf(stderr, "Error: Space run out in the disk\n");
+                free(buf);
+                exit(1);
+            }
 
-	    /* copy the data into the cluster */
-	    memcpy(cluster_to_addr(i, image_buf, bpb), buf, clust_size);
-	}
-	if (bytes < clust_size) {
-	    /* We didn't real a full cluster, so we either got a read
-	       error, or reached end of file.  We exit anyway */
-	    break;
-	}
-	prev_cluster = i;
+            /* 如果起始簇的位置还没有被记录，那就记录下来 */
+            if (start_cluster == 0)
+            {
+                start_cluster = i;
+            }
+            else
+            {
+                /* 在FAT表中把前一个簇和当前簇连接起来 */
+                assert(prev_cluster != 0);
+                set_fat_entry(prev_cluster, i, image_buf, bpb);
+            }
+
+            /* 把当前簇设为已被占用 */
+            set_fat_entry(i, FAT12_MASK&CLUST_EOFS, image_buf, bpb);
+
+            /* 将数据写入镜像映射到的簇中 */
+            memcpy(cluster_to_addr(i, image_buf, bpb), buf, clust_size);
+        }
+        if (bytes < clust_size)
+        {
+            /* 文件写完了，这是最后一个簇 */
+            break;
+        }
+        prev_cluster = i;
     }
 
     free(buf);
     return start_cluster;
 }
 
-/* write the values into a directory entry */
-void write_dirent(struct direntry *dirent, char *filename, 
-		   uint16_t start_cluster, uint32_t size)
+/* 这个是实际干活的函数 */
+/* 修改目录项dirent的内容 */
+void write_dirent(struct direntry *dirent, char *filename, uint16_t start_cluster, uint32_t size)
 {
     char *p, *p2;
     char *uppername;
     int len, i;
 
-    /* clean out anything old that used to be here */
+    /* 清空原有的内容 */
     memset(dirent, 0, sizeof(struct direntry));
 
-    /* extract just the filename part */
+    /* 复制文件名 */
     uppername = strdup(filename);
     p2 = uppername;
-    for (i = 0; i < strlen(filename); i++) {
-	if (p2[i] == '/' || p2[i] == '\\') {
-	    uppername = p2+i+1;
-	}
+    for (i = 0; i < strlen(filename); ++i)
+    {
+        if (p2[i] == '/' || p2[i] == '\\')
+        {
+            uppername = p2 + i + 1;
+	    }
     }
 
-    /* convert filename to upper case */
-    for (i = 0; i < strlen(uppername); i++) {
-	uppername[i] = toupper(uppername[i]);
+    /* 转换成大写字母 */
+    for (i = 0; i < strlen(uppername); ++i)
+    {
+	    uppername[i] = toupper(uppername[i]);
     }
 
-    /* set the file name and extension */
+    /* 将文件名和拓展名写入 */
     memset(dirent->deName, ' ', 8);
     p = strchr(uppername, '.');
     memcpy(dirent->deExtension, "___", 3);
-    if (p == NULL) {
-	fprintf(stderr, "No filename extension given - defaulting to .___\n");
-    } else {
-	*p = '\0';
-	p++;
-	len = strlen(p);
-	if (len > 3) len = 3;
-	memcpy(dirent->deExtension, p, len);
+    if (p == NULL)
+    {
+	    fprintf(stderr, "No filename extension given - defaulting to .___\n");
     }
-    if (strlen(uppername)>8) {
-	uppername[8]='\0';
+    else
+    {
+        *p = '\0';
+        p++;
+        len = strlen(p);
+        /* 舍去过长的拓展名部分 */
+        if (len > 3)
+        {
+            len = 3;
+        }
+        memcpy(dirent->deExtension, p, len);
+    }
+    if (strlen(uppername)>8)
+    {
+	    /* 舍去过长的文件名 */
+        uppername[8]='\0';
     }
     memcpy(dirent->deName, uppername, strlen(uppername));
     free(p2);
 
-    /* set the attributes and file size */
+    /* 修改文件的大小与属性(不过偷懒没写入时间)*/
     dirent->deAttributes = ATTR_NORMAL;
     putushort(dirent->deStartCluster, start_cluster);
     putulong(dirent->deFileSize, size);
 
-    /* a real filesystem would set the time and date here, but it's
-       not necessary for this coursework */
+    return;
 }
 
-
-/* create_dirent finds a free slot in the directory, and write the
-   directory entry */
-
-void create_dirent(struct direntry *dirent, char *filename, 
-		   uint16_t start_cluster, uint32_t size,
-		   uint8_t *image_buf, struct bpb33* bpb)
+/* 这个是实际干活的函数 */
+/* 在dirent中找一个没有被占用的slot，准备写入 */
+void create_dirent(struct direntry *dirent, char *filename, uint16_t start_cluster, uint32_t size, uint8_t *image_buf, struct bpb33* bpb)
 {
-    while(1) {
-	if (dirent->deName[0] == SLOT_EMPTY) {
-	    /* we found an empty slot at the end of the directory */
-	    write_dirent(dirent, filename, start_cluster, size);
-	    dirent++;
+    while(1)
+    {
+        if (dirent->deName[0] == SLOT_EMPTY)
+        {
+            /* 找到了想要的空slot */
+            write_dirent(dirent, filename, start_cluster, size);
+            dirent++;
 
-	    /* make sure the next dirent is set to be empty, just in
-	       case it wasn't before */
-	    memset((uint8_t*)dirent, 0, sizeof(struct direntry));
-	    dirent->deName[0] = SLOT_EMPTY;
-	    return;
-	}
-	if (dirent->deName[0] == SLOT_DELETED) {
-	    /* we found a deleted entry - we can just overwrite it */
-	    write_dirent(dirent, filename, start_cluster, size);
-	    return;
-	}
-	dirent++;
+            /* 确保下个slot也被设为空的 */
+            memset((uint8_t*)dirent, 0, sizeof(struct direntry));
+            dirent->deName[0] = SLOT_EMPTY;
+            return;
+        }
+        if (dirent->deName[0] == SLOT_DELETED)
+        {
+            /* 或者找到了一个原文件被删除的slot */
+            write_dirent(dirent, filename, start_cluster, size);
+            return;
+        }
+        dirent++;
     }
 }
 
-/* copyin copies a file from a regular file on the filesystem into a
-   file in the FAT-12 memory disk image  */
-
-void copyin(char *infilename, char* outfilename,
-	     uint8_t *image_buf, struct bpb33* bpb)
+/* 这个是寻找目标的函数 */
+/* 打开src的socket并且打开dst的socket */
+void copyin(char *infilename, char* outfilename, uint8_t *image_buf, struct bpb33* bpb)
 {
-    struct direntry *dirent = (void*)1;
     FILE *fd;
+    struct direntry *dirent = (void*)1;
     uint16_t start_cluster;
     uint32_t size = 0;
 
-    assert(strncmp("a:", outfilename, 2)==0);
-    outfilename+=2;
+    /* 检查格式是否正确，舍去虚拟卷标 */
+    assert(strncmp("a:", outfilename, 2) == 0);
+    outfilename += 2;
 
-    /* check that the file doesn't already exist */
+    /* 检查一下文件名是否重复 */
     dirent = find_file(outfilename, 0, FIND_FILE, image_buf, bpb);
-    if (dirent != NULL) {
-	fprintf(stderr, "File %s already exists\n", outfilename);
-	exit(1);
+    if (dirent != NULL)
+    {
+        fprintf(stderr, "Error: File %s already exists\n", outfilename);
+        exit(1);
     }
 
-    /* find the dirent of the directory to put the file in */
+    /* 找到想要存放文件的目录 */
     dirent = find_file(outfilename, 0, FIND_DIR, image_buf, bpb);
-    if (dirent == NULL) {
-	fprintf(stderr, "Directory does not exists in the disk image\n");
-	exit(1);
+    if (dirent == NULL)
+    {
+        fprintf(stderr, "Error: Directory does not exists in the disk image\n");
+        exit(1);
     }
 
-    /* open the real file for reading */
+    /* 打开源文件 */
     fd = fopen(infilename, "r");
-    if (fd == NULL) {
-	fprintf(stderr, "Can't open file %s to copy data in\n",
-		infilename);
-	exit(1);
+    if (fd == NULL)
+    {
+        fprintf(stderr, "Error: Cannot open file %s to copy data in\nCheck if you have the permission to do so.\n", infilename);
+        exit(1);
     }
 
-    /* do the actual copy in*/
+    /* 调用写入簇的函数 */
     start_cluster = copy_in_file(fd, image_buf, bpb, &size);
 
-    /* create the directory entry */
+    /* 调用更新dirent的函数 */
     create_dirent(dirent, outfilename, start_cluster, size, image_buf, bpb);
     
     fclose(fd);

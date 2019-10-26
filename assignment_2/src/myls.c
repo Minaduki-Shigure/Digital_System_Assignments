@@ -134,7 +134,7 @@ void follow_dir(uint16_t cluster, int indent, uint8_t *image_buf, struct bpb33* 
 
 		if (cluster == 0)
 		{
-			/* 根目录不管 */
+			/* 根目录直接往下走 */
 			dirent++;
 		}
 		else
