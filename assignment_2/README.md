@@ -1,6 +1,6 @@
 # My FAT12 Operator
 
->部分关于文件系统结构的头文件来自[OpenBSD项目](https://github.com/openbsd/src/tree/master/sys/msdosfs)
+>部分关于文件系统结构的头文件(lib目录中)来自[OpenBSD项目](https://github.com/openbsd/src/tree/master/sys/msdosfs)。
 
 ## How to build
 使用`make`命令生成可执行文件myls与mycp，使用`make clean`命令清理
