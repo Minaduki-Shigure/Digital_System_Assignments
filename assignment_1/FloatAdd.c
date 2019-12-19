@@ -63,13 +63,11 @@ int FloatAdd(float a_in, float b_in)
                 }
                 
             }
-        }
-        
-        ans_out_mask = ans.m + ((ans.n + 127) << 23) + (ans.s << 31);
-
-        return ans_out_mask;
-        
+        }        
     }
+
+    ans_out_mask = ans.m + ((ans.n + 127) << 23) + (ans.s << 31);
+    return ans_out_mask;
 
 }
 
